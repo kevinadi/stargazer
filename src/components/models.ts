@@ -75,6 +75,8 @@ export interface IConfig {
     defaultPassage?: boolean;
     filters?: ESectorOpts[];
   };
+  gistToken?: string;
+  gistId?: string;
 }
 
 export interface ICustomOracle extends IOracle {

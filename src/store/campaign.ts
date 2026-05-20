@@ -1,4 +1,23 @@
 import { defineStore } from 'pinia';
+
+const GIST_FILENAME = 'starforged-campaigns.json';
+const GIST_API = 'https://api.github.com';
+
+export interface IGistSizeInfo {
+  localLength: number;
+  gistLength: number;
+  gistFound: boolean;
+  error?: string;
+}
+
+interface IGistFile {
+  content: string;
+}
+
+interface IGistResponse {
+  id: string;
+  files: Record<string, IGistFile | undefined>;
+}
 import {
   ESectorOpts,
   ICampaign,
@@ -236,6 +255,111 @@ export const useCampaign = defineStore({
         }
       };
       reader.readAsText(file);
+    },
+
+    async getGistSizeInfo(token: string, gistId: string): Promise<IGistSizeInfo> {
+      const localData = JSON.stringify(await db.campaign.toArray());
+      const localLength = localData.length;
+
+      if (!gistId) {
+        return { localLength, gistLength: 0, gistFound: false };
+      }
+
+      try {
+        const res = await fetch(`${GIST_API}/gists/${gistId}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/vnd.github+json',
+          },
+        });
+
+        if (res.status === 404) {
+          return { localLength, gistLength: 0, gistFound: false };
+        }
+        if (!res.ok) {
+          return { localLength, gistLength: 0, gistFound: false, error: `GitHub API error: ${res.status} ${res.statusText}` };
+        }
+
+        const gist = (await res.json()) as IGistResponse;
+        const file = gist.files[GIST_FILENAME];
+        if (!file) {
+          return { localLength, gistLength: 0, gistFound: false };
+        }
+
+        return { localLength, gistLength: file.content.length, gistFound: true };
+      } catch (err) {
+        return { localLength, gistLength: 0, gistFound: false, error: String(err) };
+      }
+    },
+
+    async syncPush(token: string, gistId: string): Promise<string> {
+      const config = useConfig();
+      const data = JSON.stringify(await db.campaign.toArray());
+
+      const body = {
+        description: 'Stargazer campaign data',
+        public: false,
+        files: { [GIST_FILENAME]: { content: data } },
+      };
+
+      let res: Response;
+      if (gistId) {
+        res = await fetch(`${GIST_API}/gists/${gistId}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/vnd.github+json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+      } else {
+        res = await fetch(`${GIST_API}/gists`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: 'application/vnd.github+json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+      }
+
+      if (!res.ok) {
+        throw new Error(`GitHub API error: ${res.status} ${res.statusText}`);
+      }
+
+      const gist = (await res.json()) as IGistResponse;
+      const returnedId = gist.id;
+
+      if (!gistId && returnedId) {
+        config.data.gistId = returnedId;
+      }
+
+      return returnedId;
+    },
+
+    async syncPull(token: string, gistId: string): Promise<void> {
+      const res = await fetch(`${GIST_API}/gists/${gistId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error(`GitHub API error: ${res.status} ${res.statusText}`);
+      }
+
+      const gist = (await res.json()) as IGistResponse;
+      const file = gist.files[GIST_FILENAME];
+      if (!file) {
+        throw new Error(`Gist does not contain a file named "${GIST_FILENAME}"`);
+      }
+
+      const campaigns = JSON.parse(file.content) as ICampaign[];
+      await db.campaign.bulkPut(campaigns);
+      await this.populateStore();
     },
   },
 });

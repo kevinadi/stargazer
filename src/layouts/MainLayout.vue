@@ -82,6 +82,16 @@
           </q-item-section>
         </q-item>
 
+        <q-item clickable v-ripple @click="openGistSync">
+          <q-item-section avatar>
+            <q-icon name="sync_alt" />
+          </q-item-section>
+          <q-item-section>
+            Sync Campaign Data (Gist)
+            <q-tooltip>Push or pull campaign data to/from a private GitHub Gist</q-tooltip>
+          </q-item-section>
+        </q-item>
+
         <q-separator size="lg" />
 
         <q-item clickable v-ripple @click="customAssets.exportData">
@@ -361,6 +371,86 @@
       </q-card>
     </q-dialog>
 
+    <q-dialog v-model="showGistSync">
+      <q-card style="min-width: 340px">
+        <q-card-section class="text-center text-bold bg-secondary">
+          Sync Campaign Data (GitHub Gist)
+        </q-card-section>
+
+        <q-card-section class="q-gutter-sm">
+          <q-input
+            v-model="config.data.gistToken"
+            label="GitHub Personal Access Token"
+            type="password"
+            standout="bg-blue-grey text-white"
+            :input-style="{ color: '#ECEFF4' }"
+            hint="Needs 'gist' scope"
+          />
+          <q-input
+            v-model="config.data.gistId"
+            label="Gist ID (leave blank to create new)"
+            standout="bg-blue-grey text-white"
+            :input-style="{ color: '#ECEFF4' }"
+          />
+        </q-card-section>
+
+        <q-card-section v-if="gistSizeInfo" class="text-caption text-center q-pt-none">
+          <span v-if="gistSizeInfo.error" class="text-negative">{{ gistSizeInfo.error }}</span>
+          <span v-else-if="!gistSizeInfo.gistFound" class="text-grey">Gist not found — a new gist will be created on push</span>
+          <span v-else>
+            Local: {{ Math.round(gistSizeInfo.localLength / 1024 * 10) / 10 }} KB &nbsp;|&nbsp;
+            Gist: {{ Math.round(gistSizeInfo.gistLength / 1024 * 10) / 10 }} KB
+          </span>
+        </q-card-section>
+
+        <q-card-section v-if="gistSyncing" class="text-center">
+          <q-spinner color="primary" size="2em" />
+          <div class="text-caption q-mt-sm">{{ gistSyncStatus }}</div>
+        </q-card-section>
+
+        <q-card-section v-if="gistSyncError" class="text-negative text-center text-caption">
+          {{ gistSyncError }}
+        </q-card-section>
+
+        <q-card-actions align="center">
+          <q-btn
+            label="Pull from Gist"
+            color="primary"
+            flat
+            :disable="!config.data.gistToken || !config.data.gistId || gistSyncing"
+            @click="initiatePull"
+          />
+          <q-btn
+            label="Push to Gist"
+            color="positive"
+            flat
+            :disable="!config.data.gistToken || gistSyncing"
+            @click="initiatePush"
+          />
+          <q-btn label="Close" color="warning" flat @click="showGistSync = false" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
+    <q-dialog v-model="showGistConfirm">
+      <q-card style="min-width: 300px">
+        <q-card-section class="text-center text-bold bg-warning text-dark">
+          Warning
+        </q-card-section>
+
+        <q-card-section class="text-center">
+          <q-icon name="warning" size="xl" color="warning" />
+          <div class="q-mt-sm">{{ gistConfirmMessage }}</div>
+          <div class="text-caption q-mt-xs text-grey">This action cannot be undone.</div>
+        </q-card-section>
+
+        <q-card-actions align="center">
+          <q-btn label="Confirm" color="negative" flat @click="confirmGistAction" />
+          <q-btn label="Cancel" color="primary" flat @click="showGistConfirm = false" />
+        </q-card-actions>
+      </q-card>
+    </q-dialog>
+
     <roller v-model="showRoller" :btnSize="btnSize" />
   </q-layout>
 </template>
@@ -368,7 +458,7 @@
 <script lang="ts">
 import { ref, defineComponent, computed } from 'vue';
 
-import { useCampaign } from 'src/store/campaign';
+import { useCampaign, IGistSizeInfo } from 'src/store/campaign';
 import { useConfig } from 'src/store/config';
 import { useAssets } from 'src/store/assets';
 import { useQuasar, scroll } from 'quasar';
@@ -432,6 +522,98 @@ export default defineComponent({
 
     const showRoller = ref(false);
     const showAbout = ref(false);
+
+    // Gist sync
+    const showGistSync = ref(false);
+    const showGistConfirm = ref(false);
+    const gistSizeInfo = ref<IGistSizeInfo | null>(null);
+    const gistSyncing = ref(false);
+    const gistSyncStatus = ref('');
+    const gistSyncError = ref('');
+    const gistConfirmMessage = ref('');
+    const pendingGistAction = ref<'push' | 'pull' | null>(null);
+
+    const openGistSync = async () => {
+      gistSyncError.value = '';
+      gistSizeInfo.value = null;
+      showGistSync.value = true;
+      const token = config.data.gistToken ?? '';
+      const gistId = config.data.gistId ?? '';
+      if (token) {
+        gistSizeInfo.value = await campaign.getGistSizeInfo(token, gistId);
+      }
+    };
+
+    const initiatePush = () => {
+      gistSyncError.value = '';
+      const info = gistSizeInfo.value;
+      if (info && info.gistFound && info.gistLength > info.localLength) {
+        gistConfirmMessage.value =
+          'The gist appears to be newer (larger) than your local data. Pushing will overwrite it with your local copy.';
+        pendingGistAction.value = 'push';
+        showGistConfirm.value = true;
+      } else {
+        void executePush();
+      }
+    };
+
+    const initiatePull = () => {
+      gistSyncError.value = '';
+      const info = gistSizeInfo.value;
+      if (info && info.gistFound && info.localLength > info.gistLength) {
+        gistConfirmMessage.value =
+          'Your local data appears to be newer (larger) than the gist. Pulling will overwrite your local copy with the gist data.';
+        pendingGistAction.value = 'pull';
+        showGistConfirm.value = true;
+      } else {
+        void executePull();
+      }
+    };
+
+    const confirmGistAction = () => {
+      showGistConfirm.value = false;
+      if (pendingGistAction.value === 'push') void executePush();
+      else if (pendingGistAction.value === 'pull') void executePull();
+      pendingGistAction.value = null;
+    };
+
+    const executePush = async () => {
+      const token = config.data.gistToken ?? '';
+      const gistId = config.data.gistId ?? '';
+      gistSyncing.value = true;
+      gistSyncStatus.value = 'Pushing to GitHub Gist...';
+      gistSyncError.value = '';
+      try {
+        const returnedId = await campaign.syncPush(token, gistId);
+        config.data.gistId = returnedId;
+        gistSyncStatus.value = 'Push successful!';
+        gistSizeInfo.value = await campaign.getGistSizeInfo(token, returnedId);
+      } catch (err) {
+        gistSyncError.value = String(err);
+      } finally {
+        gistSyncing.value = false;
+        gistSyncStatus.value = '';
+      }
+    };
+
+    const executePull = async () => {
+      const token = config.data.gistToken ?? '';
+      const gistId = config.data.gistId ?? '';
+      gistSyncing.value = true;
+      gistSyncStatus.value = 'Pulling from GitHub Gist...';
+      gistSyncError.value = '';
+      try {
+        await campaign.syncPull(token, gistId);
+        gistSyncStatus.value = 'Pull successful!';
+        gistSizeInfo.value = await campaign.getGistSizeInfo(token, gistId);
+        showGistSync.value = false;
+      } catch (err) {
+        gistSyncError.value = String(err);
+      } finally {
+        gistSyncing.value = false;
+        gistSyncStatus.value = '';
+      }
+    };
     const crt = computed((): boolean => {
       return /bebop/i.test(campaign.data.sectors[config.data.sector].name);
     });
@@ -486,6 +668,19 @@ export default defineComponent({
       showAbout,
       btnSize,
       crt,
+
+      showGistSync,
+      showGistConfirm,
+      gistSizeInfo,
+      gistSyncing,
+      gistSyncStatus,
+      gistSyncError,
+      gistConfirmMessage,
+      openGistSync,
+      initiatePush,
+      initiatePull,
+      confirmGistAction,
+
       scrollTo,
     };
   },
