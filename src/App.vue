@@ -73,6 +73,32 @@ export default defineComponent({
     onMounted(async () => {
       await Promise.all([initialiseData(), renderIntro()]);
       loaded.value = true;
+
+      // PWA update prompt
+      document.addEventListener('swUpdated', (e) => {
+        const reg = (e as CustomEvent<ServiceWorkerRegistration>).detail
+        $q.notify({
+          message: 'A new version is available',
+          caption: 'Tap Refresh to update',
+          color: 'dark',
+          textColor: 'positive',
+          position: 'bottom',
+          timeout: 0,
+          actions: [
+            {
+              label: 'Refresh',
+              color: 'positive',
+              handler: () => {
+                if (reg.waiting) {
+                  reg.waiting.postMessage({ type: 'SKIP_WAITING' })
+                }
+                window.location.reload()
+              },
+            },
+            { label: 'Dismiss', color: 'grey' },
+          ],
+        })
+      }, { once: true })
     });
 
     const config = useConfig();

@@ -258,7 +258,7 @@ export const useCampaign = defineStore({
     },
 
     async getGistSizeInfo(token: string, gistId: string): Promise<IGistSizeInfo> {
-      const localData = JSON.stringify(await db.campaign.toArray());
+      const localData = JSON.stringify(await db.campaign.toArray(), null, 2);
       const localLength = localData.length;
 
       if (!gistId) {

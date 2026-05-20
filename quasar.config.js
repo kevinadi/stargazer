@@ -130,8 +130,9 @@ module.exports = configure(function (ctx) {
     pwa: {
       workboxPluginMode: 'GenerateSW', // 'GenerateSW' or 'InjectManifest'
       workboxOptions: {
-        skipWaiting: true,
+        skipWaiting: false,
         clientsClaim: true,
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
       }, // only for GenerateSW
 
       // for the custom service worker ONLY (/src-pwa/custom-service-worker.[js|ts])
