@@ -294,7 +294,7 @@ export const useCampaign = defineStore({
 
     async syncPush(token: string, gistId: string): Promise<string> {
       const config = useConfig();
-      const data = JSON.stringify(await db.campaign.toArray());
+      const data = JSON.stringify(await db.campaign.toArray(), null, 2);
 
       const body = {
         description: 'Stargazer campaign data',
