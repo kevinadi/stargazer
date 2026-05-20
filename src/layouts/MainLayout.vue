@@ -578,6 +578,10 @@ export default defineComponent({
     };
 
     const executePush = async () => {
+      if (!navigator.onLine) {
+        $q.notify({ message: 'No internet connection', color: 'negative', position: 'bottom' });
+        return;
+      }
       const token = config.data.gistToken ?? '';
       const gistId = config.data.gistId ?? '';
       gistSyncing.value = true;
@@ -589,7 +593,9 @@ export default defineComponent({
         gistSyncStatus.value = 'Push successful!';
         gistSizeInfo.value = await campaign.getGistSizeInfo(token, returnedId);
       } catch (err) {
-        gistSyncError.value = String(err);
+        const msg = String(err);
+        gistSyncError.value = msg;
+        $q.notify({ message: 'Sync failed', caption: msg, color: 'negative', position: 'bottom' });
       } finally {
         gistSyncing.value = false;
         gistSyncStatus.value = '';
@@ -597,6 +603,10 @@ export default defineComponent({
     };
 
     const executePull = async () => {
+      if (!navigator.onLine) {
+        $q.notify({ message: 'No internet connection', color: 'negative', position: 'bottom' });
+        return;
+      }
       const token = config.data.gistToken ?? '';
       const gistId = config.data.gistId ?? '';
       gistSyncing.value = true;
@@ -608,7 +618,9 @@ export default defineComponent({
         gistSizeInfo.value = await campaign.getGistSizeInfo(token, gistId);
         showGistSync.value = false;
       } catch (err) {
-        gistSyncError.value = String(err);
+        const msg = String(err);
+        gistSyncError.value = msg;
+        $q.notify({ message: 'Sync failed', caption: msg, color: 'negative', position: 'bottom' });
       } finally {
         gistSyncing.value = false;
         gistSyncStatus.value = '';
